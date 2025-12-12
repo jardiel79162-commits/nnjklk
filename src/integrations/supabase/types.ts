@@ -17,30 +17,36 @@ export type Database = {
       videos: {
         Row: {
           created_at: string
+          expires_at: string | null
           filename: string
           id: string
           mime_type: string
           original_name: string
+          password_hash: string | null
           size_bytes: number
           slug: string
           storage_path: string
         }
         Insert: {
           created_at?: string
+          expires_at?: string | null
           filename: string
           id?: string
           mime_type: string
           original_name: string
+          password_hash?: string | null
           size_bytes: number
           slug: string
           storage_path: string
         }
         Update: {
           created_at?: string
+          expires_at?: string | null
           filename?: string
           id?: string
           mime_type?: string
           original_name?: string
+          password_hash?: string | null
           size_bytes?: number
           slug?: string
           storage_path?: string
