@@ -14,7 +14,7 @@ const Index = () => {
   const [errorMessage, setErrorMessage] = useState<string>("");
 
   const generateSlug = () => {
-    return Math.random().toString(36).substring(2, 10);
+    return `jtc${Math.random().toString(36).substring(2, 8)}`;
   };
 
   const handleUpload = useCallback(async (file: File) => {
