@@ -2,34 +2,72 @@ import { useState, useCallback } from "react";
 import { VideoDropzone } from "@/components/VideoDropzone";
 import { UploadProgress } from "@/components/UploadProgress";
 import { ShareLink } from "@/components/ShareLink";
+import { VideoConfig, VideoConfigData } from "@/components/VideoConfig";
 import { supabase } from "@/integrations/supabase/client";
-import { Play } from "lucide-react";
+import { Play, ArrowRight } from "lucide-react";
 
-type UploadStatus = "idle" | "uploading" | "processing" | "complete" | "error";
+type UploadStatus = "idle" | "configuring" | "uploading" | "processing" | "complete" | "error";
 
 const Index = () => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>("idle");
   const [shareLink, setShareLink] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [videoConfig, setVideoConfig] = useState<VideoConfigData>({
+    expiresIn: "unlimited",
+    password: "",
+  });
 
   const generateSlug = () => {
     return `jtc${Math.random().toString(36).substring(2, 8)}`;
   };
 
-  const handleUpload = useCallback(async (file: File) => {
+  const calculateExpirationDate = (expiresIn: VideoConfigData["expiresIn"]): Date | null => {
+    if (expiresIn === "unlimited") return null;
+    
+    const now = new Date();
+    switch (expiresIn) {
+      case "1h":
+        return new Date(now.getTime() + 60 * 60 * 1000);
+      case "24h":
+        return new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      case "7d":
+        return new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      case "30d":
+        return new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+      default:
+        return null;
+    }
+  };
+
+  const simpleHash = async (password: string): Promise<string> => {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(password);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+  };
+
+  const handleFileSelect = (file: File) => {
+    setSelectedFile(file);
+    setUploadStatus("configuring");
+    setErrorMessage("");
+  };
+
+  const handleStartUpload = useCallback(async () => {
+    if (!selectedFile) return;
+
     setUploadStatus("uploading");
     setUploadProgress(0);
     setShareLink(null);
-    setErrorMessage("");
 
     const slug = generateSlug();
-    const fileExt = file.name.split(".").pop();
+    const fileExt = selectedFile.name.split(".").pop();
     const fileName = `${slug}.${fileExt}`;
     const storagePath = `uploads/${fileName}`;
 
     try {
-      // Simulate progress for better UX (Supabase doesn't have built-in progress)
       const progressInterval = setInterval(() => {
         setUploadProgress((prev) => {
           if (prev >= 90) {
@@ -40,10 +78,9 @@ const Index = () => {
         });
       }, 200);
 
-      // Upload to Supabase Storage
       const { error: uploadError } = await supabase.storage
         .from("videos")
-        .upload(storagePath, file, {
+        .upload(storagePath, selectedFile, {
           cacheControl: "3600",
           upsert: false,
         });
@@ -57,14 +94,20 @@ const Index = () => {
       setUploadProgress(95);
       setUploadStatus("processing");
 
-      // Save video metadata to database
+      const expiresAt = calculateExpirationDate(videoConfig.expiresIn);
+      const passwordHash = videoConfig.password 
+        ? await simpleHash(videoConfig.password) 
+        : null;
+
       const { error: dbError } = await supabase.from("videos").insert({
         slug,
         filename: fileName,
-        original_name: file.name,
-        mime_type: file.type,
-        size_bytes: file.size,
+        original_name: selectedFile.name,
+        mime_type: selectedFile.type,
+        size_bytes: selectedFile.size,
         storage_path: storagePath,
+        expires_at: expiresAt?.toISOString() || null,
+        password_hash: passwordHash,
       });
 
       if (dbError) {
@@ -79,13 +122,15 @@ const Index = () => {
       setUploadStatus("error");
       setErrorMessage(error.message || "Erro ao fazer upload");
     }
-  }, []);
+  }, [selectedFile, videoConfig]);
 
   const resetUpload = () => {
     setUploadStatus("idle");
     setUploadProgress(0);
     setShareLink(null);
     setErrorMessage("");
+    setSelectedFile(null);
+    setVideoConfig({ expiresIn: "unlimited", password: "" });
   };
 
   return (
@@ -116,9 +161,42 @@ const Index = () => {
           <div className="space-y-6">
             {uploadStatus === "idle" && (
               <VideoDropzone
-                onFileSelect={handleUpload}
-                disabled={uploadStatus !== "idle"}
+                onFileSelect={handleFileSelect}
+                disabled={false}
               />
+            )}
+
+            {uploadStatus === "configuring" && selectedFile && (
+              <div className="space-y-4 animate-fade-in">
+                <div className="p-4 rounded-xl bg-card border border-border flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
+                    <Play className="w-5 h-5 text-primary fill-primary" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-foreground truncate">{selectedFile.name}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {(selectedFile.size / (1024 * 1024)).toFixed(1)} MB
+                    </p>
+                  </div>
+                </div>
+
+                <VideoConfig config={videoConfig} onChange={setVideoConfig} />
+
+                <button
+                  onClick={handleStartUpload}
+                  className="w-full py-4 rounded-xl bg-primary text-primary-foreground font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
+                >
+                  Iniciar Upload
+                  <ArrowRight className="w-5 h-5" />
+                </button>
+
+                <button
+                  onClick={resetUpload}
+                  className="w-full py-3 rounded-xl bg-secondary text-foreground font-medium hover:bg-secondary/80 transition-colors"
+                >
+                  Cancelar
+                </button>
+              </div>
             )}
 
             {(uploadStatus === "uploading" ||
